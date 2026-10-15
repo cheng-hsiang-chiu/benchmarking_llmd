@@ -1,0 +1,8 @@
+# Exclude raw per-request AIPerf JSONL trace dumps (up to 399 MB per file)
+**/profile_export.jsonl
+**/server_metrics_export.json
+**/logs/
+
+# Exclude downloaded HuggingFace dataset images (generated via convert_mmshopbench_to_aiperf.py)
+**/mmshopbench/
+**/agentic_multimodal/

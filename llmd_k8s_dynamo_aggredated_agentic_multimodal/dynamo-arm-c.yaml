@@ -1,0 +1,278 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dynamo-etcd
+  namespace: llm-d-multimodal-aggregation
+spec:
+  selector:
+    app: dynamo-etcd
+  ports:
+  - name: client
+    port: 2379
+    targetPort: 2379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dynamo-etcd
+  namespace: llm-d-multimodal-aggregation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dynamo-etcd
+  template:
+    metadata:
+      labels:
+        app: dynamo-etcd
+    spec:
+      containers:
+      - name: etcd
+        image: quay.io/coreos/etcd:v3.5.15
+        command:
+        - /usr/local/bin/etcd
+        - --name=etcd0
+        - --data-dir=/etcd-data
+        - --listen-client-urls=http://0.0.0.0:2379
+        - --advertise-client-urls=http://dynamo-etcd:2379
+        - --listen-peer-urls=http://0.0.0.0:2380
+        - --initial-advertise-peer-urls=http://127.0.0.1:2380
+        - --initial-cluster=etcd0=http://127.0.0.1:2380
+        - --initial-cluster-state=new
+        ports:
+        - containerPort: 2379
+          name: client
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 2379
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
+        - name: etcd-data
+          mountPath: /etcd-data
+      volumes:
+      - name: etcd-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dynamo-frontend
+  namespace: llm-d-multimodal-aggregation
+spec:
+  selector:
+    app: dynamo-frontend
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dynamo-frontend
+  namespace: llm-d-multimodal-aggregation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dynamo-frontend
+  template:
+    metadata:
+      labels:
+        app: dynamo-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: docker.io/vllm/vllm-openai:v0.30.0
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+          ulimit -n 65535 2>/dev/null || true
+          pip install --no-deps ai-dynamo==1.5.1 ai-dynamo-runtime==1.5.1
+          while true; do
+            python3 -m dynamo.frontend \
+              --http-host 0.0.0.0 \
+              --http-port 8000 \
+              --router-mode kv \
+              --router-kv-events \
+              --discovery-backend etcd \
+              --request-plane tcp \
+              --event-plane zmq || true
+            sleep 1
+          done
+        env:
+        - name: ETCD_ENDPOINTS
+          value: "http://dynamo-etcd:2379"
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: llm-d-hf-token
+              key: HF_TOKEN
+        ports:
+        - containerPort: 8000
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+          limits:
+            cpu: "8"
+            memory: "32Gi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dynamo-vllm-worker
+  namespace: llm-d-multimodal-aggregation
+  labels:
+    app: dynamo-vllm-worker
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: dynamo-vllm-worker
+  template:
+    metadata:
+      labels:
+        app: dynamo-vllm-worker
+    spec:
+      serviceAccountName: mm-baseline-nvidia-gpu-vllm-sa
+      containers:
+      - name: modelserver
+        image: docker.io/vllm/vllm-openai:v0.30.0
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+          ulimit -n 65535 2>/dev/null || true
+          pip install --no-deps --no-index --find-links=/hf-cache/wheels ai-dynamo==1.5.1 ai-dynamo-runtime==1.5.1
+          cat <<'PYEOF' > /tmp/run_dynamo_worker.py
+          import sys
+          import uvloop
+          from dynamo.vllm.handlers import BaseWorkerHandler
+          from dynamo.vllm.worker_factory import WorkerFactory
+          from dynamo.vllm.main import worker
+
+          async def reset_all_caches(self, body=None):
+              await self.engine_client.reset_prefix_cache()
+              try:
+                  await self.engine_client.reset_mm_cache()
+              except Exception:
+                  pass
+              try:
+                  await self.engine_client.reset_encoder_cache()
+              except Exception:
+                  pass
+              return {"status": "ok", "message": "All caches reset"}
+
+          BaseWorkerHandler.reset_all_caches = reset_all_caches
+          _orig_register = WorkerFactory.register_engine_routes
+
+          def _patched_register(self, runtime, generate_endpoint, handler, lora_enabled=False):
+              _orig_register(self, runtime, generate_endpoint, handler, lora_enabled=lora_enabled)
+              runtime.register_engine_route("reset_all_caches", handler.reset_all_caches)
+
+          WorkerFactory.register_engine_routes = _patched_register
+
+          if __name__ == "__main__":
+              uvloop.run(worker(sys.argv[1:]))
+          PYEOF
+          exec python3 /tmp/run_dynamo_worker.py \
+            --model Qwen/Qwen3-VL-32B-Instruct \
+            --tensor-parallel-size 2 \
+            --mm-processor-cache-gb 20 \
+            --enable-prefix-caching \
+            --enable-multimodal \
+            --kv-events-config '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}' \
+            --discovery-backend etcd \
+            --request-plane tcp \
+            --event-plane zmq
+        env:
+        - name: HF_HOME
+          value: /hf-cache
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: llm-d-hf-token
+              key: HF_TOKEN
+        - name: NCCL_TUNER_PLUGIN
+          value: none
+        - name: VLLM_SERVER_DEV_MODE
+          value: "1"
+        - name: ETCD_ENDPOINTS
+          value: "http://dynamo-etcd:2379"
+        - name: DYN_SYSTEM_ENABLED
+          value: "true"
+        - name: DYN_SYSTEM_PORT
+          value: "8000"
+        ports:
+        - containerPort: 8000
+          name: system
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 120
+        resources:
+          requests:
+            cpu: "8"
+            memory: "128Gi"
+            nvidia.com/gpu: "2"
+          limits:
+            cpu: "16"
+            memory: "256Gi"
+            nvidia.com/gpu: "2"
+        volumeMounts:
+        - name: shm
+          mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /hf-cache
+        - name: torch-compile-cache
+          mountPath: /.cache
+        - name: triton-cache
+          mountPath: /.triton
+        - name: vllm-config
+          mountPath: /.config
+      volumes:
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 20Gi
+      - name: hf-cache
+        hostPath:
+          path: /mnt/stateful_partition/kube-ephemeral-ssd/shared_disk/vllm-hf-cache
+          type: DirectoryOrCreate
+      - name: torch-compile-cache
+        emptyDir: {}
+      - name: triton-cache
+        emptyDir: {}
+      - name: vllm-config
+        emptyDir: {}
