@@ -530,7 +530,7 @@ kubectl exec -n ${NAMESPACE} mmshopbench-client -- \
 
 ### 6.5 Arm C Step-by-Step Instructions & Recipe: NVIDIA Dynamo (`v1.5.1`) KV Router
 
-Arm C follows the official [`ai-dynamo/dynamo`](https://github.com/ai-dynamo/dynamo) aggregated multimodal KV-routing configuration (`agg_router.sh` + `agg_multimodal.sh`), built on the exact same `docker.io/vllm/vllm-openai:v0.30.0` base image and `8 × TP=2` H200 topology so there is zero engine or driver version skew against Arms A & B.
+Arm C follows the official [`ai-dynamo/dynamo`](https://github.com/ai-dynamo/dynamo) aggregated multimodal KV-routing configuration (`agg_router.sh` + `agg_multimodal.sh`, identical to [`agg_multimodal_router.sh`](https://github.com/ai-dynamo/dynamo/blob/main/examples/backends/vllm/launch/agg_multimodal_router.sh)), built on the exact same `docker.io/vllm/vllm-openai:v0.30.0` base image and `8 × TP=2` H200 topology so there is zero engine or driver version skew against Arms A & B.
 
 #### Step 1: Scale Down `mm-baseline-nvidia-gpu-vllm-decode` to Free the 16 H200 GPUs
 ```bash
