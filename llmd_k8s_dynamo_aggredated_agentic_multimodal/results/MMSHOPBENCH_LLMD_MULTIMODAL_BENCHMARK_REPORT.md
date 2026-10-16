@@ -177,7 +177,7 @@ To connect the routing-layer metrics (`vLLM Prefix Cache Hit %`) directly to the
   $$AI_{\text{ridge}} = \frac{P_{\text{peak}}}{BW_{\text{peak}}} = \frac{1,978\text{ TFLOPS}}{9.6\text{ TB/s}} \approx \mathbf{206.0\text{ FLOPs/Byte}}$$
 * **`Qwen/Qwen3-VL-32B-Instruct` (`BF16`) Per-Token Compute & Memory Footprint**:
   * **Weights ($W_{\text{LLM}}$)**: $N_{\text{params}} \approx 32.8 \times 10^9$ language-backbone parameters in `BF16` ($2\text{ Bytes/param}$) $= \mathbf{65.6\text{ GB}}$ streamed per decode step across the `TP=2` replica ($32.8\text{ GB/GPU}$).
-  * **KV Cache per Token**: $64\text{ layers} \times 2\text{ (K,V)} \times 8\text{ KV heads} \times 128\text{ head\_dim} \times 2\text{ Bytes} = \mathbf{262.1\text{ KB/token}}$.
+  * **KV Cache per Token**: $64\text{ layers} \times 2\text{ (K,V)} \times 8\text{ KV heads} \times 128\text{ head dim} \times 2\text{ Bytes} = \mathbf{262.1\text{ KB/token}}$.
   * **Compute per Token**: $C_{\text{decode}} = 2 N_{\text{params}} + \text{Attn} \approx \mathbf{66.6\text{ GFLOPs/token}}$; $C_{\text{prefill}} \approx \mathbf{68.5\text{ GFLOPs/token}}$ (including amortized `Qwen3-VL` 32-layer Vision Transformer `ViT` patch encoding).
   * **Physical vs. Effective Compute per Replica**: With per-replica output token rate $R_{\text{out}} = \frac{\text{Output Tok/s}}{8}$, per-replica input token rate $R_{\text{in}} = \frac{\text{Total Tok/s} - \text{Output Tok/s}}{8}$, and prefix-cache hit rate $h \in [0, 1]$ (so the uncached prefill miss fraction is $1 - h$):
     $$P_{\text{phys}} = \frac{C_{\text{decode}} \cdot R_{\text{out}} + C_{\text{prefill}} \cdot (1 - h) \cdot R_{\text{in}}}{10^3}\text{ (Physical GPU TFLOPS/replica)}$$
