@@ -29,6 +29,8 @@ This directory contains the complete benchmark report, 99-run empirical results 
 | ![ITL p50](./results/plots/mmshopbench_itl_p50_vs_concurrency.png) | ![ITL p90](./results/plots/mmshopbench_itl_p90_vs_concurrency.png) |
 | **Total Token Throughput vs. Concurrency** | **Output Token Throughput vs. Concurrency** |
 | ![Total Token Throughput](./results/plots/mmshopbench_total_token_throughput_vs_concurrency.png) | ![Output Token Throughput](./results/plots/mmshopbench_output_token_throughput_vs_concurrency.png) |
+| **Hardware & Effective Roofline (`TP=2` H200 Replica)** | **Serving Roofline: Throughput vs. Interactivity Pareto** |
+| ![Hardware Roofline](./results/plots/mmshopbench_hardware_roofline.png) | ![Serving Roofline Pareto](./results/plots/mmshopbench_serving_roofline_pareto.png) |
 
 ---
 
@@ -38,13 +40,14 @@ This directory contains the complete benchmark report, 99-run empirical results 
 llmd_k8s_dynamo_aggredated_agentic_multimodal/
 ├── README.md                                           # Overview, headline findings, and directory index
 ├── dynamo-arm-c.yaml                                   # Complete Kubernetes manifest for Arm C (NVIDIA Dynamo v1.5.1 + 8x TP=2 vLLM)
+├── generate_roofline_plots.py                          # Roofline & Throughput-Interactivity Pareto plot generator
 ├── run_phase4_mmshopbench.sh                           # Automated concurrency sweep script for Arm A (llm-d) & Arm B (K8s Round-Robin)
 ├── run_phase4c_dynamo.sh                               # Automated concurrency sweep script for Arm C (NVIDIA Dynamo KV Router)
 ├── run_c8192_all_3_arms.sh                             # High-concurrency (c=8192) EPP memory scaling & sweep helper
 └── results/
-    ├── MMSHOPBENCH_LLMD_MULTIMODAL_BENCHMARK_REPORT.md # Full technical report + Section 6 step-by-step reproducibility guide
+    ├── MMSHOPBENCH_LLMD_MULTIMODAL_BENCHMARK_REPORT.md # Full technical report + Section 4.3 Roofline Analysis + Section 6 reproducibility guide
     ├── mmshopbench_phase4_summary.csv                  # 33-row mean ± std summary table across all 99 runs (c=8..8192 x 3 arms)
-    ├── plots/                                          # 6 high-resolution (300 DPI) comparison PNG charts
+    ├── plots/                                          # 8 high-resolution (300 DPI) comparison & roofline PNG charts
     ├── llmd/c{8..8192}/iter_{1..3}/                    # Per-iteration AIPerf & vLLM Prometheus metrics for Arm A (llm-d)
     ├── k8s_rr/c{8..8192}/iter_{1..3}/                  # Per-iteration AIPerf & vLLM Prometheus metrics for Arm B (K8s Round-Robin)
     └── dynamo/c{8..8192}/iter_{1..3}/                  # Per-iteration AIPerf & vLLM Prometheus metrics for Arm C (NVIDIA Dynamo)

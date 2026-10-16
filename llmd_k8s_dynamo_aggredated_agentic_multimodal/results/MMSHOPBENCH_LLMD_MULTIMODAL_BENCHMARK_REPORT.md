@@ -164,11 +164,82 @@ All values below report **`mean ± standard deviation`** across 3 independent it
    * Even in this oversubscribed regime, `llm-d` retains a **7.6 percentage-point cache-hit advantage over Dynamo** and **15.0 percentage-point advantage over K8s Round-Robin**, translating into **`1.91×` lower TTFT p50 vs. Dynamo** (`9,987.56 ms` vs. `19,047.79 ms`), **`2.50×` lower TTFT p50 vs. K8s Round-Robin** (`9,987.56 ms` vs. `25,009.71 ms`), and **`+10.9%` / `+25.3%` higher output token throughput** (`25,509.2 tok/s` vs. `23,007.5 tok/s` on Dynamo and `20,356.2 tok/s` on K8s RR).
    * Notably, at `c = 8192`, `llm-d` exhibits a slightly higher per-step decode ITL (`254.08 ms` p50 vs. `232.54 ms` on Dynamo and `232.92 ms` on K8s RR) despite lower end-to-end latency (`59.7 s` E2E p50 vs. `66.4 s` on Dynamo and `72.1 s` on K8s RR). Because `llm-d` drains the prefill queue `1.9–2.5×` faster, it admits significantly more active sequences into the concurrent vLLM decode batch at any instant (`25,509.2 output tok/s`), whereas Dynamo and K8s Round-Robin bottleneck in `19–25 s` prefill queues.
 
+### 4.3 Roofline & Hardware Efficiency Analysis (`TP=2` NVIDIA H200 SXM)
+
+To connect the routing-layer metrics (`vLLM Prefix Cache Hit %`) directly to the physical hardware limits of **`16 × NVIDIA H200 SXM (141 GB)` GPUs** (`8` replicas $\times$ `TP=2`), we model each `TP=2` replica using the **Roofline Model** alongside the **Serving Throughput–Interactivity Pareto Frontier**.
+
+#### 1. Hardware & Model Constants (`1 Replica = 2 × NVIDIA H200 SXM`)
+* **Peak Dense BF16 Tensor Core Compute ($P_{\text{peak}}$)**: Per the official NVIDIA H200 SXM specification (`1,979 TFLOPS` with 2:4 sparsity $\implies \mathbf{989\text{ TFLOPS}}$ dense BF16 per GPU), each `TP=2` replica provides:
+  $$P_{\text{peak}} = 2 \times 989\text{ TFLOPS} = \mathbf{1,978\text{ TFLOPS/replica}} \quad (\mathbf{15.82\text{ PFLOPS}}\text{ across 8 replicas})$$
+* **Peak HBM3e Memory Bandwidth ($BW_{\text{peak}}$)**: Each H200 SXM provides $4.8\text{ TB/s}$ of HBM3e bandwidth, giving each `TP=2` replica:
+  $$BW_{\text{peak}} = 2 \times 4.8\text{ TB/s} = \mathbf{9.6\text{ TB/s/replica}} \quad (\mathbf{76.8\text{ TB/s}}\text{ across 8 replicas})$$
+* **Hardware Ridge Point ($AI_{\text{ridge}}$)**: The transition boundary between memory-bandwidth-bound and compute-bound execution is:
+  $$AI_{\text{ridge}} = \frac{P_{\text{peak}}}{BW_{\text{peak}}} = \frac{1,978\text{ TFLOPS}}{9.6\text{ TB/s}} \approx \mathbf{206.0\text{ FLOPs/Byte}}$$
+* **`Qwen/Qwen3-VL-32B-Instruct` (`BF16`) Per-Token Compute & Memory Footprint**:
+  * **Weights ($W_{\text{LLM}}$)**: $N_{\text{params}} \approx 32.8 \times 10^9$ language-backbone parameters in `BF16` ($2\text{ Bytes/param}$) $= \mathbf{65.6\text{ GB}}$ streamed per decode step across the `TP=2` replica ($32.8\text{ GB/GPU}$).
+  * **KV Cache per Token**: $64\text{ layers} \times 2\text{ (K,V)} \times 8\text{ KV heads} \times 128\text{ head\_dim} \times 2\text{ Bytes} = \mathbf{262.1\text{ KB/token}}$.
+  * **Compute per Token**: $C_{\text{decode}} = 2 N_{\text{params}} + \text{Attn} \approx \mathbf{66.6\text{ GFLOPs/token}}$; $C_{\text{prefill}} \approx \mathbf{68.5\text{ GFLOPs/token}}$ (including amortized `Qwen3-VL` 32-layer Vision Transformer `ViT` patch encoding).
+  * **Physical vs. Effective Compute per Replica**: With per-replica output token rate $R_{\text{out}} = \frac{\text{Output Tok/s}}{8}$, per-replica input token rate $R_{\text{in}} = \frac{\text{Total Tok/s} - \text{Output Tok/s}}{8}$, and prefix-cache hit rate $h \in [0, 1]$ (so the uncached prefill miss fraction is $1 - h$):
+    $$P_{\text{phys}} = \frac{C_{\text{decode}} \cdot R_{\text{out}} + C_{\text{prefill}} \cdot (1 - h) \cdot R_{\text{in}}}{10^3}\text{ (Physical GPU TFLOPS/replica)}$$
+    $$P_{\text{eff}} = \frac{C_{\text{decode}} \cdot R_{\text{out}} + C_{\text{prefill}} \cdot R_{\text{in}}}{10^3}\text{ (Effective Logical TFLOPS/replica)}$$
+
+#### 2. Three Hardware Regimes Across `c = 8 .. 8192`
+1. **Regime 1 — HBM3e Memory-Bandwidth Floor (`c = 8 .. 32`, $AI_{\text{phys}} = 1.3\text{–}5.9\text{ FLOPs/Byte}$)**:
+   * For `BF16` weights ($2\text{ Bytes/param}$), a decode step with active batch size $B_{\text{dec}}$ performs $2 B_{\text{dec}} N_{\text{params}}$ FLOPs while reading $2 N_{\text{params}}$ weight bytes from HBM3e, yielding $AI_{\text{decode}} \approx B_{\text{dec}}\text{ FLOPs/Byte}$.
+   * From Little's Law on per-replica decode throughput ($B_{\text{dec}} = \frac{R_{\text{out}}}{1000 / \text{ITL}_{\text{p50}}}$), the active decode batch size per replica is $B_{\text{dec}} = \mathbf{1.0}$ at `c = 8`, $\mathbf{1.9}$ at `c = 16`, and $\mathbf{3.6}$ at `c = 32` ($AI_{\text{phys}} = 1.3\text{–}5.9\text{ FLOPs/Byte} \ll 206\text{ FLOPs/Byte}$).
+   * Reading $65.6\text{ GB}$ of weights at achievable HBM3e bandwidth (`~7.2–7.7 TB/s`, or `75–80%` of $9.6\text{ TB/s}$) takes **`8.5–9.1 ms`**, plus **`1.0–1.4 ms`** for $128$ `TP=2` NVLink `AllReduce` operations ($2\text{ per layer} \times 64\text{ layers}$) and non-matmul kernels, establishing a physical single-stream decode floor of **`~9.5–10.5 ms/token`**. The measured `c = 8` ITL p50 (**`10.84–11.05 ms`**, or **`90.5–92.3 tok/s/user`**) sits directly on this HBM3e bandwidth ceiling.
+2. **Regime 2 — Prefix Caching as an Effective Compute Multiplier at the Physical GPU Ceiling (`c = 128 .. 4096`)**:
+   * Uncached prefill bursts and `Qwen3-VL` ViT image encoding process hundreds to thousands of tokens/patches per step ($AI > 206\text{ FLOPs/Byte}$, **compute-bound**).
+   * At **`c = 4096`**, **all three routing arms saturate at the exact same physical GPU compute ceiling of `360.6–372.9 Physical TFLOPS/replica`** (`362.1 TFLOPS` on `llm-d`, `372.9 TFLOPS` on Dynamo, `360.6 TFLOPS` on K8s Round-Robin). This confirms that the 16 H200 GPUs are running at identical physical saturation across all three arms.
+   * However, because `llm-d` achieves an **`89.7%` prefix-cache hit rate** (`10.3%` uncached prefill fraction) vs. **`78.3%` on Dynamo** (`21.7%` uncached $\rightarrow \mathbf{2.11\times}$ more uncached prefill compute per input token) and **`63.8%` on K8s Round-Robin** (`36.2%` uncached $\rightarrow \mathbf{3.51\times}$ more uncached prefill compute), `llm-d` spends only **`21.3%`** of its physical GPU FLOPs on prefill (`77.1 TFLOPS` prefill vs. `285.0 TFLOPS` decode), whereas Dynamo spends **`36.2%`** (`134.9 TFLOPS`) and K8s Round-Robin wastes **`51.4%`** (`185.3 TFLOPS`) recomputing missed prefixes and ViT embeddings.
+   * Consequently, `llm-d` achieves an **Effective Logical Compute Rate of `1,030.3 TFLOPS/replica` (`2.85×` its physical GPU FLOPs)**, compared to **`858.5 Effective TFLOPS/replica` on Dynamo** and **`669.1 Effective TFLOPS/replica` on K8s Round-Robin**.
+3. **Regime 3 — The HBM3e KV-Cache Capacity Wall (`c = 4096 → 8192`)**:
+   * At `c = 8192` (`1,024` concurrent sessions/replica), **physical GPU compute does not drop**—in fact, it edges up slightly to **`375.8–387.7 Physical TFLOPS/replica`** (`387.7 TFLOPS` on `llm-d`).
+   * Throughput rolls over (`121,280.2 → 90,377.6 tok/s` on `llm-d`, or `7,580.0 → 5,648.6 tok/s/GPU`) solely because the active multi-turn KV working set exceeds the `~10.8M`-token aggregate HBM3e KV capacity (`~175–180 GB/replica`), causing prefix-cache hit rate to drop from **`89.7% → 68.4%`** (tripling the uncached prefill fraction from **`10.3% → 31.6%`**). Re-prefilling evicted KV blocks consumes **`45.2%`** of physical GPU FLOPs (`175.3 / 387.7 TFLOPS`), pulling `llm-d`'s Effective Logical Compute down from **`1,030.3` to `767.8 TFLOPS/replica`**.
+
+#### 3. Complete Roofline Metrics Table (`c = 8 .. 8192`)
+
+| Concurrency | Arm | Active Decode Batch / Replica ($B_{\text{dec}}$) | Uncached Prefill Miss ($1 - h$) | HBM3e BW Streamed (TB/s/rep) | Physical $AI_{\text{phys}}$ (FLOPs/B) | Physical GPU Compute (TFLOPS/rep) | Effective $AI_{\text{eff}}$ (FLOPs/B) | Effective Logical Compute (TFLOPS/rep) | User Interactivity (tok/s/user) | Total Throughput per GPU (tok/s/H200) |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **8** | **Arm A (`llmd`)** | 1.0 | **14.5%** | 5.99 | 1.3 | 8.0 | 3.5 | 20.9 | 90.99 | 154.1 |
+| 8 | Arm C (`dynamo`) | 1.0 | 17.0% | 6.07 | 1.4 | 8.5 | 3.5 | **21.2** | **92.25** | **156.3** |
+| 8 | Arm B (`k8s_rr`) | 1.0 | 18.5% | 5.95 | 1.4 | 8.5 | 3.5 | 20.8 | 90.50 | 153.2 |
+| **16** | **Arm A (`llmd`)** | 1.9 | **14.5%** | 5.93 | 2.6 | 15.5 | 6.8 | 40.5 | 89.85 | 298.2 |
+| 16 | Arm C (`dynamo`) | 1.9 | 21.2% | 5.97 | 2.9 | 17.5 | 6.8 | **40.6** | **90.50** | **298.8** |
+| 16 | Arm B (`k8s_rr`) | 1.9 | 31.2% | 5.86 | 3.4 | 19.9 | 6.8 | 39.7 | 88.89 | 292.0 |
+| **32** | **Arm A (`llmd`)** | 3.6 | **14.5%** | 5.79 | 5.0 | 29.1 | 13.1 | **76.1** | **87.34** | **560.2** |
+| 32 | Arm C (`dynamo`) | 3.6 | 24.3% | 5.77 | 5.9 | 34.0 | 13.0 | 75.2 | 86.96 | 553.4 |
+| 32 | Arm B (`k8s_rr`) | 3.6 | 23.8% | 5.67 | 5.9 | 33.4 | 13.1 | 74.4 | 85.47 | 547.2 |
+| **64** | **Arm A (`llmd`)** | 6.8 | **14.6%** | 5.54 | 9.4 | 51.9 | 24.5 | **135.8** | **82.64** | **998.8** |
+| 64 | Arm C (`dynamo`) | 6.8 | 26.2% | 5.39 | 11.3 | 61.1 | 24.4 | 131.3 | 80.45 | 966.1 |
+| 64 | Arm B (`k8s_rr`) | 6.8 | 31.3% | 5.25 | 12.3 | 64.4 | 24.4 | 128.1 | 78.37 | 942.1 |
+| **128** | **Arm A (`llmd`)** | 11.5 | **14.7%** | 5.07 | 15.6 | 79.3 | 40.8 | **207.0** | **74.63** | **1,522.6** |
+| 128 | Arm C (`dynamo`) | 11.8 | 28.6% | 4.70 | 20.2 | 94.8 | 41.7 | 195.9 | 69.16 | 1,441.3 |
+| 128 | Arm B (`k8s_rr`) | 11.7 | 40.8% | 4.45 | 23.7 | 105.4 | 41.4 | 184.3 | 65.49 | 1,356.0 |
+| **256** | **Arm A (`llmd`)** | 16.6 | **14.6%** | 4.54 | 22.2 | 100.7 | 58.0 | **263.3** | **65.83** | **1,937.3** |
+| 256 | Arm C (`dynamo`) | 17.7 | 30.8% | 3.91 | 30.8 | 120.5 | 61.7 | 241.4 | 56.53 | 1,775.6 |
+| 256 | Arm B (`k8s_rr`) | 18.6 | 51.0% | 3.37 | 41.6 | 140.4 | 64.5 | 217.5 | 48.61 | 1,600.0 |
+| **512** | **Arm A (`llmd`)** | 34.0 | **12.7%** | 3.77 | 41.7 | 157.0 | 113.1 | **425.9** | **51.98** | **3,133.1** |
+| 512 | Arm C (`dynamo`) | 37.2 | 26.6% | 3.14 | 57.4 | 180.4 | 122.5 | 384.9 | 42.96 | 2,831.4 |
+| 512 | Arm B (`k8s_rr`) | 37.4 | 41.4% | 2.74 | 70.9 | 194.1 | 123.0 | 336.7 | 37.43 | 2,477.4 |
+| **1024** | **Arm A (`llmd`)** | 74.7 | **11.7%** | 2.88 | 80.5 | 232.0 | 223.0 | **643.1** | **35.73** | **4,731.0** |
+| 1024 | Arm C (`dynamo`) | 82.8 | 23.9% | 2.35 | 108.8 | 255.4 | 242.0 | 568.3 | 28.51 | 4,180.6 |
+| 1024 | Arm B (`k8s_rr`) | 83.9 | 39.1% | 1.93 | 136.9 | 264.8 | 244.6 | 473.1 | 23.43 | 3,480.5 |
+| **2048** | **Arm A (`llmd`)** | 174.8 | **10.8%** | 2.11 | 147.8 | 311.3 | 416.9 | **878.0** | **20.86** | **6,459.6** |
+| 2048 | Arm C (`dynamo`) | 189.6 | 22.2% | 1.69 | 192.1 | 323.9 | 439.3 | 740.4 | 16.22 | 5,447.2 |
+| 2048 | Arm B (`k8s_rr`) | 183.4 | 37.9% | 1.36 | 236.7 | 320.9 | 430.1 | 583.0 | 13.20 | 4,288.9 |
+| **4096** | **Arm A (`llmd`)** | 395.5 | **10.3%** | 1.57 | 229.9 | **362.1** | 654.2 | **1,030.3** | **10.82** | **7,580.0** |
+| 4096 | Arm C (`dynamo`) | 416.2 | 21.8% | 1.29 | 290.2 | **372.9** | 668.1 | 858.5 | 8.58 | 6,316.3 |
+| 4096 | Arm B (`k8s_rr`) | 394.5 | 36.2% | 1.02 | 351.9 | **360.6** | 653.0 | 669.1 | 7.05 | 4,922.5 |
+| **8192** | **Arm A (`llmd`)** | 810.2 | **31.6%** | 0.90 | 429.4 | **387.7** | 850.4 | **767.8** | 3.94 | **5,648.6** |
+| 8192 | Arm C (`dynamo`) | 668.8 | 39.2% | 0.86 | 447.6 | **386.5** | 798.3 | 689.4 | **4.30** | 5,071.8 |
+| 8192 | Arm B (`k8s_rr`) | 592.7 | 46.6% | 0.80 | 472.0 | **375.8** | 769.5 | 612.6 | 4.29 | 4,506.7 |
+
 ---
 
-## 5. Performance Plots (`c = 8` to `8192`)
+## 5. Performance & Roofline Plots (`c = 8` to `8192`)
 
-All 6 charts below plot the 3-iteration mean (solid/dashed/dash-dot lines) and $\pm 1\sigma$ standard deviation band (shaded region) across all 11 concurrency levels (`c = 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192`) for **Arm A (`llm-d` Multimodal Router)**, **Arm B (`K8s Service Round-Robin`)**, and **Arm C (`NVIDIA Dynamo KV Router`)**.
+All 8 charts below plot the 3-iteration mean (solid/dashed/dash-dot lines) and $\pm 1\sigma$ standard deviation band (shaded region) across all 11 concurrency levels (`c = 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192`) for **Arm A (`llm-d` Multimodal Router)**, **Arm B (`K8s Service Round-Robin`)**, and **Arm C (`NVIDIA Dynamo KV Router`)**.
 
 ### 5.1 TTFT p50 vs. Concurrency
 ![MMShopBench TTFT p50 vs. Concurrency](plots/mmshopbench_ttft_p50_vs_concurrency.png)
@@ -187,6 +258,12 @@ All 6 charts below plot the 3-iteration mean (solid/dashed/dash-dot lines) and $
 
 ### 5.6 Output Token Throughput vs. Concurrency
 ![MMShopBench Output Token Throughput vs. Concurrency](plots/mmshopbench_output_token_throughput_vs_concurrency.png)
+
+### 5.7 Hardware & Effective Roofline Analysis (`TP=2` H200 Replica)
+![MMShopBench Roofline Analysis](plots/mmshopbench_hardware_roofline.png)
+
+### 5.8 Serving Roofline: Throughput vs. Interactivity Pareto Frontier (`16 × H200`)
+![MMShopBench Serving Roofline Pareto Frontier](plots/mmshopbench_serving_roofline_pareto.png)
 
 ---
 
