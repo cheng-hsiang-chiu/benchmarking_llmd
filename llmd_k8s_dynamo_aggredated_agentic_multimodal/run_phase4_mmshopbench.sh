@@ -4,8 +4,8 @@
 #
 # - Arm A (llmd):   aggregation-epp:80 (llm-d Multimodal Router)
 # - Arm B (k8s_rr): multimodal-k8s-rr-baseline:8000 (K8s Round-Robin Service)
-# - Concurrencies:  8, 16, 32, 64, 128, 256, 512
-# - Iterations:     3 per (Arm, Concurrency) -> 42 total runs
+# - Concurrencies:  8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096
+# - Iterations:     3 per (Arm, Concurrency) -> 60 total runs
 # - Cache Reset:    vLLM (/reset_prefix_cache, /reset_mm_cache, /reset_encoder_cache)
 #                   + EPP router rollout restart before EVERY run
 # - Storage Clean:  Clears pod /workspace/results, /tmp/aiperf*, and workload-pvc
@@ -17,7 +17,7 @@ NAMESPACE="llm-d-multimodal-aggregation"
 GUIDE_NAME="aggregation"
 MODEL="Qwen/Qwen3-VL-32B-Instruct"
 HOST_RESULTS_DIR="${SCRIPT_DIR}/results"
-CONCURRENCIES=(${CONCURRENCIES:-8 16 32 64 128 256 512 1024 2048 4096 8192})
+CONCURRENCIES=(${CONCURRENCIES:-8 16 32 64 128 256 512 1024 2048 4096})
 ITERATIONS=(${ITERATIONS:-1 2 3})
 
 mkdir -p "${HOST_RESULTS_DIR}"

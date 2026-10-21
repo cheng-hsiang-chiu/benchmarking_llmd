@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render publication-quality Hardware Roofline and Serving Roofline Pareto PNGs using PyCairo + PangoCairo."""
+"""Render all 8 publication-quality MMShopBench charts (c=8..4096) using PyCairo + PangoCairo."""
 import json
 import math
 from pathlib import Path
@@ -237,8 +237,8 @@ def render_hardware_roofline(metrics: dict, out_path: Path):
     ctx.stroke()
     ctx.restore()
 
-    # 3. Sustained Physical GPU Compute Ceiling (~361-388 TFLOPS/replica across all 3 arms at c=4096..8192)
-    _, py_phys_ceil = to_px(xmin, 375.0)
+    # 3. Sustained Physical GPU Compute Ceiling (~361-373 TFLOPS/replica across all 3 arms at c=4096)
+    _, py_phys_ceil = to_px(xmin, 366.0)
     ctx.save()
     ctx.set_source_rgba(0.45, 0.25, 0.65, 0.75)
     ctx.set_line_width(3.2)
@@ -317,7 +317,7 @@ def render_hardware_roofline(metrics: dict, out_path: Path):
         draw_text(ctx, f"{yt:,}", left - 20, py, "DejaVu Sans 21", (0.1, 0.1, 0.1), ha="right", va="center")
     ctx.restore()
 
-    draw_text(ctx, "MMShopBench Roofline Analysis: Qwen3-VL-32B (TP=2 H200 Replica, c=8..8192)",
+    draw_text(ctx, "MMShopBench Roofline Analysis: Qwen3-VL-32B (TP=2 H200 Replica, c=8..4096)",
               left + pw / 2, 58, "DejaVu Sans Bold 26", (0.05, 0.05, 0.05), ha="center", va="center")
     draw_text(ctx, "Operational Intensity (FLOPs / HBM Byte Transferred) [Log Scale]",
               left + pw / 2, H - 55, "DejaVu Sans Bold 23", (0.05, 0.05, 0.05), ha="center", va="center")
@@ -334,8 +334,8 @@ def render_hardware_roofline(metrics: dict, out_path: Path):
               to_px(950, REPLICA_PEAK_TFLOPS)[0], py_1978 - 20,
               "DejaVu Sans Bold 17.5", hex_rgb("#202124"), ha="center", va="bottom")
 
-    # Sustained physical compute ceiling label (placed cleanly on the left side above the purple dashed line)
-    draw_text(ctx, "Sustained Physical GPU Ceiling (~361–388 Physical TFLOPS/replica across all 3 arms)",
+    # Sustained physical compute ceiling label
+    draw_text(ctx, "Sustained Physical GPU Ceiling (~361–373 Physical TFLOPS/replica across all 3 arms at c=4096)",
               left + 28, py_phys_ceil - 18, "DejaVu Sans Bold 16.5", color_phys, ha="left", va="bottom")
 
     # Key concurrency annotations on Arm A (llm-d) Effective curve
@@ -352,38 +352,27 @@ def render_hardware_roofline(metrics: dict, out_path: Path):
     # Clean non-overlapping annotations on the right side (AI = 650..5000) with leader lines
     m_a4096 = metrics["llmd"][9]
     px_a4, py_a4 = to_px(m_a4096["eff_ai"], m_a4096["eff_tflops"])
-    draw_leader(ctx, px_a4, py_a4, px_a4 + 35, py_a4 - 55, color_llmd)
+    draw_leader(ctx, px_a4, py_a4, px_a4 + 45, py_a4 - 45, color_llmd)
     draw_text(ctx, "llm-d Peak (c=4096):\n1,030 Eff TFLOPS (2.85× Phys)",
-              px_a4 + 42, py_a4 - 55, "DejaVu Sans Bold 16.5", color_llmd, ha="left", va="center")
+              px_a4 + 52, py_a4 - 45, "DejaVu Sans Bold 16.5", color_llmd, ha="left", va="center")
 
     m_d4096 = metrics["dynamo"][9]
     px_d4, py_d4 = to_px(m_d4096["eff_ai"], m_d4096["eff_tflops"])
-    draw_leader(ctx, px_d4, py_d4, px_d4 + 80, py_d4 - 22, color_dyn)
+    draw_leader(ctx, px_d4, py_d4, px_d4 + 65, py_d4 - 6, color_dyn)
     draw_text(ctx, "Dynamo Peak (c=4096): 859 Eff TFLOPS",
-              px_d4 + 88, py_d4 - 22, "DejaVu Sans Bold 16.5", color_dyn, ha="left", va="center")
-
-    m_a8192 = metrics["llmd"][10]
-    px_a8, py_a8 = to_px(m_a8192["eff_ai"], m_a8192["eff_tflops"])
-    draw_leader(ctx, px_a8, py_a8, px_a8 + 40, py_a8 + 4, color_llmd)
-    draw_text(ctx, "llm-d c=8192 KV Wall: 768 Eff TFLOPS\n(Cache Hit: 89.7% → 68.4%)",
-              px_a8 + 48, py_a8 + 6, "DejaVu Sans Bold 16", color_llmd, ha="left", va="center")
+              px_d4 + 72, py_d4 - 6, "DejaVu Sans Bold 16.5", color_dyn, ha="left", va="center")
 
     m_k4096 = metrics["k8s_rr"][9]
     px_k4, py_k4 = to_px(m_k4096["eff_ai"], m_k4096["eff_tflops"])
-    draw_leader(ctx, px_k4, py_k4, px_k4 + 80, py_k4 + 36, color_k8s)
+    draw_leader(ctx, px_k4, py_k4, px_k4 + 65, py_k4 + 28, color_k8s)
     draw_text(ctx, "K8s RR Peak (c=4096): 669 Eff TFLOPS",
-              px_k4 + 88, py_k4 + 38, "DejaVu Sans Bold 16.5", color_k8s, ha="left", va="center")
+              px_k4 + 72, py_k4 + 30, "DejaVu Sans Bold 16.5", color_k8s, ha="left", va="center")
 
-    # Physical curve c=4096 & c=8192 labels below the purple curve
+    # Physical curve c=4096 label below the purple curve
     px_p4, py_p4 = to_px(m_a4096["phys_ai"], m_a4096["phys_tflops"])
-    draw_leader(ctx, px_p4, py_p4, px_p4 + 10, py_p4 + 45, color_phys)
-    draw_text(ctx, "c=4096 Physical (362 TFLOPS)", px_p4 + 16, py_p4 + 48,
+    draw_leader(ctx, px_p4, py_p4, px_p4 + 18, py_p4 + 42, color_phys)
+    draw_text(ctx, "c=4096 Physical (362 TFLOPS)", px_p4 + 24, py_p4 + 45,
               "DejaVu Sans Bold 16", color_phys, ha="left", va="top")
-
-    px_p8, py_p8 = to_px(m_a8192["phys_ai"], m_a8192["phys_tflops"])
-    draw_leader(ctx, px_p8, py_p8, px_p8 + 30, py_p8 + 6, color_phys)
-    draw_text(ctx, "c=8192 Physical (388 TFLOPS)", px_p8 + 36, py_p8 + 6,
-              "DejaVu Sans Bold 16", color_phys, ha="left", va="center")
 
     # Legend box (top-left)
     leg_x, leg_y, leg_w, leg_h = left + 24, top + 22, 1180, 260
@@ -401,7 +390,7 @@ def render_hardware_roofline(metrics: dict, out_path: Path):
         ("#1a73e8", "o", "-", "Arm A: llm-d Effective Logical Compute (89.7% Prefix Hit at Peak)"),
         ("#1e8e3e", "^", "-.", "Arm C: NVIDIA Dynamo Effective Logical Compute (78.3% Hit at Peak)"),
         ("#d93025", "s", "--", "Arm B: K8s Round-Robin Effective Logical Compute (63.8% Hit at Peak)"),
-        ("#6a1b9a", "d", ":", "Actual Physical GPU Compute Executed (Saturates at ~361–388 TFLOPS)"),
+        ("#6a1b9a", "d", ":", "Actual Physical GPU Compute Executed (Saturates at ~361–373 TFLOPS)"),
     ]
     for i, (col_hex, mk, ls, lbl) in enumerate(legend_items):
         ly = leg_y + 30 + i * 48
@@ -565,18 +554,12 @@ def render_serving_pareto_roofline(metrics: dict, out_path: Path):
             draw_text(ctx, f"c={m['c']} ({m['tot_tps_per_gpu']:,.0f})", px + 14, py - 14,
                       "DejaVu Sans Bold 16.5", color_llmd, ha="left", va="bottom")
 
-    # Clean non-overlapping Peak (c=4096) and Rollover (c=8192) annotations with leader lines
+    # Clean non-overlapping Peak (c=4096) annotations with leader lines
     m_a4 = metrics["llmd"][9]
     px_a4, py_a4 = to_px(m_a4["interactivity"], m_a4["tot_tps_per_gpu"])
     draw_leader(ctx, px_a4, py_a4, px_a4 + 125, py_a4 - 38, color_llmd)
     draw_text(ctx, "llm-d Peak (c=4096): 7,580 tok/s/GPU\n(+20.0% vs Dynamo, +54.0% vs K8s RR)",
               px_a4 + 132, py_a4 - 40, "DejaVu Sans Bold 17.5", color_llmd, ha="left", va="center")
-
-    m_a8 = metrics["llmd"][10]
-    px_a8, py_a8 = to_px(m_a8["interactivity"], m_a8["tot_tps_per_gpu"])
-    draw_leader(ctx, px_a8, py_a8, px_a8 + 2, py_a8 - 255, color_llmd)
-    draw_text(ctx, "c=8192 KV Rollover\n(5,649 tok/s/GPU)",
-              px_a8 + 2, py_a8 - 262, "DejaVu Sans Bold 16.5", color_llmd, ha="left", va="bottom")
 
     m_d4 = metrics["dynamo"][9]
     px_d4, py_d4 = to_px(m_d4["interactivity"], m_d4["tot_tps_per_gpu"])
@@ -626,13 +609,256 @@ def render_serving_pareto_roofline(metrics: dict, out_path: Path):
     print("Saved:", out_path)
 
 
+def render_concurrency_charts(data: dict, concs: list[int], out_dir: Path):
+    color_llmd = hex_rgb("#1a73e8")
+    color_k8s = hex_rgb("#d93025")
+    color_dyn = hex_rgb("#1e8e3e")
+
+    plots = [
+        {
+            "filename": "mmshopbench_ttft_p50_vs_concurrency.png",
+            "title": "MMShopBench: TTFT p50 vs. Concurrency (Qwen3-VL-32B, 16×H200)",
+            "ylabel": "Time to First Token p50 (ms) — Lower is Better [Log Scale]",
+            "mean_key": "ttft_p50_ms_mean",
+            "std_key": "ttft_p50_ms_std",
+            "fmt": "{:.1f} ms",
+            "log_y": True,
+        },
+        {
+            "filename": "mmshopbench_ttft_p90_vs_concurrency.png",
+            "title": "MMShopBench: TTFT p90 vs. Concurrency (Qwen3-VL-32B, 16×H200)",
+            "ylabel": "Time to First Token p90 (ms) — Lower is Better [Log Scale]",
+            "mean_key": "ttft_p90_ms_mean",
+            "std_key": "ttft_p90_ms_std",
+            "fmt": "{:.1f} ms",
+            "log_y": True,
+        },
+        {
+            "filename": "mmshopbench_itl_p50_vs_concurrency.png",
+            "title": "MMShopBench: Inter-Token Latency p50 vs. Concurrency (Qwen3-VL-32B, 16×H200)",
+            "ylabel": "Inter-Token Latency p50 (ms) — Lower is Better",
+            "mean_key": "itl_p50_ms_mean",
+            "std_key": "itl_p50_ms_std",
+            "fmt": "{:.2f} ms",
+            "log_y": False,
+        },
+        {
+            "filename": "mmshopbench_itl_p90_vs_concurrency.png",
+            "title": "MMShopBench: Inter-Token Latency p90 vs. Concurrency (Qwen3-VL-32B, 16×H200)",
+            "ylabel": "Inter-Token Latency p90 (ms) — Lower is Better",
+            "mean_key": "itl_p90_ms_mean",
+            "std_key": "itl_p90_ms_std",
+            "fmt": "{:.2f} ms",
+            "log_y": False,
+        },
+        {
+            "filename": "mmshopbench_total_token_throughput_vs_concurrency.png",
+            "title": "MMShopBench: Total Token Throughput vs. Concurrency (Qwen3-VL-32B, 16×H200)",
+            "ylabel": "Total Token Throughput (tokens/sec) — Higher is Better",
+            "mean_key": "total_tok_per_sec_mean",
+            "std_key": "total_tok_per_sec_std",
+            "fmt": "{:,.0f}",
+            "log_y": False,
+        },
+        {
+            "filename": "mmshopbench_output_token_throughput_vs_concurrency.png",
+            "title": "MMShopBench: Output Token Throughput vs. Concurrency (Qwen3-VL-32B, 16×H200)",
+            "ylabel": "Output Token Throughput (tokens/sec) — Higher is Better",
+            "mean_key": "output_tok_per_sec_mean",
+            "std_key": "output_tok_per_sec_std",
+            "fmt": "{:,.0f}",
+            "log_y": False,
+        },
+    ]
+
+    for spec in plots:
+        W, H = 2640, 1560
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
+        ctx = cairo.Context(surface)
+        ctx.set_source_rgb(1, 1, 1)
+        ctx.paint()
+
+        left, right, top, bottom = 275, W - 75, 130, H - 180
+        pw, ph = right - left, bottom - top
+        n = len(concs)
+
+        y_llmd = [data["llmd"][str(c)][spec["mean_key"]] for c in concs]
+        s_llmd = [data["llmd"][str(c)][spec["std_key"]] for c in concs]
+        y_k8s = [data["k8s_rr"][str(c)][spec["mean_key"]] for c in concs]
+        s_k8s = [data["k8s_rr"][str(c)][spec["std_key"]] for c in concs]
+        y_dyn = [data["dynamo"][str(c)][spec["mean_key"]] for c in concs]
+        s_dyn = [data["dynamo"][str(c)][spec["std_key"]] for c in concs]
+
+        max_y = max(max(y_llmd), max(y_k8s), max(y_dyn))
+        if spec["log_y"]:
+            ymin, ymax = 30.0, max_y * 2.1
+            lymin, lymax = math.log10(ymin), math.log10(ymax)
+
+            def to_px(idx_val: float, y_val: float) -> tuple[float, float]:
+                px = left + (idx_val / (n - 1)) * pw
+                ly = math.log10(max(y_val, ymin))
+                py = bottom - (ly - lymin) / (lymax - lymin) * ph
+                return px, py
+
+            y_ticks = [t for t in [50, 100, 200, 500, 1000, 2000, 5000] if t <= ymax]
+        else:
+            ymin, ymax = 0.0, max_y * 1.18
+
+            def to_px(idx_val: float, y_val: float) -> tuple[float, float]:
+                px = left + (idx_val / (n - 1)) * pw
+                py = bottom - (y_val - ymin) / (ymax - ymin) * ph
+                return px, py
+
+            if max_y > 50000:
+                y_ticks = [t for t in range(0, int(ymax) + 1, 20000)]
+            elif max_y > 10000:
+                y_ticks = [t for t in range(0, int(ymax) + 1, 5000)]
+            else:
+                y_ticks = [t for t in range(0, int(ymax) + 1, 25)]
+
+        # Grid
+        ctx.save()
+        ctx.set_line_width(1.6)
+        ctx.set_dash([3.0, 5.0])
+        ctx.set_source_rgba(0.68, 0.68, 0.68, 0.75)
+        for i in range(n):
+            px, _ = to_px(i, ymin)
+            ctx.move_to(px, top)
+            ctx.line_to(px, bottom)
+            ctx.stroke()
+        for yt in y_ticks:
+            _, py = to_px(0, yt)
+            ctx.move_to(left, py)
+            ctx.line_to(right, py)
+            ctx.stroke()
+        ctx.restore()
+
+        ctx.save()
+        ctx.rectangle(left, top, pw, ph)
+        ctx.clip()
+
+        series = [
+            (y_k8s, s_k8s, color_k8s, "s", "--"),
+            (y_dyn, s_dyn, color_dyn, "^", "-."),
+            (y_llmd, s_llmd, color_llmd, "o", "-"),
+        ]
+        for ym, ys, col, mk, ls in series:
+            pts_hi = [to_px(i, ym[i] + ys[i]) for i in range(n)]
+            pts_lo = [to_px(i, max(ymin, ym[i] - ys[i])) for i in reversed(range(n))]
+            ctx.save()
+            ctx.set_source_rgba(*col, 0.15)
+            for i, (px, py) in enumerate(pts_hi):
+                if i == 0:
+                    ctx.move_to(px, py)
+                else:
+                    ctx.line_to(px, py)
+            for px, py in pts_lo:
+                ctx.line_to(px, py)
+            ctx.close_path()
+            ctx.fill()
+            ctx.restore()
+
+            pts = [to_px(i, ym[i]) for i in range(n)]
+            ctx.save()
+            ctx.set_source_rgb(*col)
+            ctx.set_line_width(5.8)
+            apply_dash(ctx, ls)
+            for i, (px, py) in enumerate(pts):
+                if i == 0:
+                    ctx.move_to(px, py)
+                else:
+                    ctx.line_to(px, py)
+            ctx.stroke()
+            ctx.restore()
+            for px, py in pts:
+                draw_marker(ctx, mk, px, py, 10.5, col)
+
+        ctx.restore()
+
+        # Spines & ticks
+        ctx.save()
+        ctx.set_source_rgb(0.1, 0.1, 0.1)
+        ctx.set_line_width(2.6)
+        ctx.move_to(left, top)
+        ctx.line_to(left, bottom)
+        ctx.line_to(right, bottom)
+        ctx.stroke()
+        for i, c in enumerate(concs):
+            px, _ = to_px(i, ymin)
+            ctx.move_to(px, bottom)
+            ctx.line_to(px, bottom + 12)
+            ctx.stroke()
+            draw_text(ctx, str(c), px, bottom + 22, "DejaVu Sans 21", (0.1, 0.1, 0.1), ha="center", va="top")
+        for yt in y_ticks:
+            _, py = to_px(0, yt)
+            ctx.move_to(left - 12, py)
+            ctx.line_to(left, py)
+            ctx.stroke()
+            draw_text(ctx, f"{yt:,}", left - 20, py, "DejaVu Sans 21", (0.1, 0.1, 0.1), ha="right", va="center")
+        ctx.restore()
+
+        is_tput = "Throughput" in spec["title"]
+        for idx in [6, 7, 8, 9]:  # c=512, 1024, 2048, 4096
+            px_a, py_a = to_px(idx, y_llmd[idx])
+            px_k, py_k = to_px(idx, y_k8s[idx])
+            px_d, py_d = to_px(idx, y_dyn[idx])
+            if is_tput:
+                draw_text(ctx, spec["fmt"].format(y_llmd[idx]), px_a, py_a - 24, "DejaVu Sans Bold 16.5", color_llmd, ha="center", va="bottom")
+                draw_text(ctx, spec["fmt"].format(y_k8s[idx]), px_k, py_k + 24, "DejaVu Sans Bold 16.5", color_k8s, ha="center", va="top")
+                draw_text(ctx, spec["fmt"].format(y_dyn[idx]), px_d - 16, py_d - 6, "DejaVu Sans Bold 16.5", color_dyn, ha="right", va="bottom")
+            else:
+                draw_text(ctx, spec["fmt"].format(y_llmd[idx]), px_a, py_a + 24, "DejaVu Sans Bold 16.5", color_llmd, ha="center", va="top")
+                draw_text(ctx, spec["fmt"].format(y_k8s[idx]), px_k, py_k - 24, "DejaVu Sans Bold 16.5", color_k8s, ha="center", va="bottom")
+                draw_text(ctx, spec["fmt"].format(y_dyn[idx]), px_d - 16, py_d - 6, "DejaVu Sans Bold 16.5", color_dyn, ha="right", va="bottom")
+
+        draw_text(ctx, spec["title"], left + pw / 2, 58, "DejaVu Sans Bold 25.5", (0.05, 0.05, 0.05), ha="center", va="center")
+        draw_text(ctx, "Concurrent Multi-Turn Shopping Sessions (Concurrency)", left + pw / 2, H - 55, "DejaVu Sans Bold 22.5", (0.05, 0.05, 0.05), ha="center", va="center")
+        draw_text(ctx, spec["ylabel"], 65, top + ph / 2, "DejaVu Sans Bold 22.5", (0.05, 0.05, 0.05), ha="center", va="center", angle_deg=-90)
+
+        # Legend (top-left)
+        leg_x, leg_y, leg_w, leg_h = left + 28, top + 24, 900, 175
+        ctx.save()
+        ctx.set_source_rgba(1, 1, 1, 0.93)
+        ctx.rectangle(leg_x, leg_y, leg_w, leg_h)
+        ctx.fill_preserve()
+        ctx.set_source_rgba(0.75, 0.75, 0.75, 0.9)
+        ctx.set_line_width(2.0)
+        ctx.stroke()
+        ctx.restore()
+
+        legend_items = [
+            ("#1a73e8", "o", "-", "Arm A: llm-d Multimodal Router (EPP)"),
+            ("#d93025", "s", "--", "Arm B: K8s Service (Round-Robin Baseline)"),
+            ("#1e8e3e", "^", "-.", "Arm C: NVIDIA Dynamo KV Router"),
+        ]
+        for i, (col_hex, mk, ls, lbl) in enumerate(legend_items):
+            ly = leg_y + 34 + i * 52
+            lx0, lx1 = leg_x + 26, leg_x + 106
+            col = hex_rgb(col_hex)
+            ctx.save()
+            ctx.set_source_rgb(*col)
+            ctx.set_line_width(5.5)
+            apply_dash(ctx, ls)
+            ctx.move_to(lx0, ly)
+            ctx.line_to(lx1, ly)
+            ctx.stroke()
+            ctx.restore()
+            draw_marker(ctx, mk, (lx0 + lx1) / 2.0, ly, 10.0, col)
+            draw_text(ctx, lbl, lx1 + 22, ly, "DejaVu Sans 20.5", (0.1, 0.1, 0.1), ha="left", va="center")
+
+        out_path = out_dir / spec["filename"]
+        surface.write_to_png(str(out_path))
+        print("Saved:", out_path)
+
+
 def main() -> None:
     data = json.loads(DATA_PATH.read_text())
-    concs = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+    concs = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
     metrics = {arm: [compute_roofline_metrics(data[arm][str(c)]) for c in concs] for arm in ["llmd", "dynamo", "k8s_rr"]}
 
     render_hardware_roofline(metrics, OUT_DIR / "mmshopbench_hardware_roofline.png")
     render_serving_pareto_roofline(metrics, OUT_DIR / "mmshopbench_serving_roofline_pareto.png")
+    render_concurrency_charts(data, concs, OUT_DIR)
 
 
 if __name__ == "__main__":

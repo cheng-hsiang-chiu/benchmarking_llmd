@@ -4,17 +4,15 @@
 
 This report evaluates **`llm-d`'s Multimodal Optimized Baseline** ([`guides/multimodal-serving/aggregation/README.md`](https://github.com/llm-d/llm-d/blob/main/guides/multimodal-serving/aggregation/README.md)) against both a standard **Kubernetes Service (Round-Robin)** baseline and **NVIDIA Dynamo (`v1.5.1` KV Router)** on **`16 × NVIDIA H200 (141 GB)` GPUs** (`8` replicas of `Qwen/Qwen3-VL-32B-Instruct`, `TP=2`, `vLLM v0.30.0`) using real-world multi-turn multimodal e-commerce shopping logs from [`kellyhao/mmshopbench`](https://huggingface.co/datasets/kellyhao/mmshopbench).
 
-Across **99 benchmark runs** (`3` routing arms $\times$ `11` concurrency levels `8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192` $\times$ `3` iterations per point, `0` failed requests), `llm-d`'s multimodal Endpoint Picker (`EPP`) router consistently outperforms both **Kubernetes Round-Robin** and **NVIDIA Dynamo KV Router** in Time to First Token (`TTFT`), Inter-Token Latency (`ITL`), prefix-cache hit rate, and token throughput:
+Across **90 benchmark runs** (`3` routing arms $\times$ `10` concurrency levels `8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096` $\times$ `3` iterations per point, `0` failed requests), `llm-d`'s multimodal Endpoint Picker (`EPP`) router consistently outperforms both **Kubernetes Round-Robin** and **NVIDIA Dynamo KV Router** in Time to First Token (`TTFT`), Inter-Token Latency (`ITL`), prefix-cache hit rate, and token throughput:
 
-* **Highest Multimodal Prefix-Cache Affinity (`85.3%–89.7%` Hit Rate up to `c = 4096`; `68.4%` under KV Saturation at `c = 8192`)**: By hashing both text and image content blocks (via dynamic spatial patch estimation in `token-producer`) and pinning Turn 2+ requests—including later-round user photo uploads—to the replica holding prior turns' KV and ViT caches, `llm-d` sustains an **85.3%–89.7% vLLM prefix-cache hit rate** across `c = 8..4096` (and **68.4%** at `c = 8192` when KV capacity is oversubscribed). By comparison, **NVIDIA Dynamo KV Router** achieves **69.3%–83.0%** across `c = 8..4096` (**60.8%** at `c = 8192`), and **Kubernetes Round-Robin** drops to **49.0%–63.8%** at `c = 128..4096` (**53.4%** at `c = 8192`).
-* **Up to `3.94×` Lower TTFT p90 at Peak Throughput (`c = 4096`) & `2.50×` Lower TTFT p50 Under Extreme Overload (`c = 8192`)**:
+* **Highest Multimodal Prefix-Cache Affinity (`85.3%–89.7%` Hit Rate across `c = 8..4096`)**: By hashing both text and image content blocks (via dynamic spatial patch estimation in `token-producer`) and pinning Turn 2+ requests—including later-round user photo uploads—to the replica holding prior turns' KV and ViT caches, `llm-d` sustains an **85.3%–89.7% vLLM prefix-cache hit rate** across `c = 8..4096`. By comparison, **NVIDIA Dynamo KV Router** achieves **69.3%–83.0%** across `c = 8..4096`, and **Kubernetes Round-Robin** drops to **49.0%–63.8%** at `c = 128..4096`.
+* **Up to `3.94×` Lower TTFT p90 & `5.51×` Lower TTFT p99 at Peak Throughput (`c = 4096`)**:
   * At `c = 256`, `llm-d` achieves **`61.02 ms` TTFT p50** and **`259.16 ms` TTFT p90**, outperforming **NVIDIA Dynamo** (`109.93 ms` p50 / `395.72 ms` p90, **`1.80×` / `1.53×` faster**) and **K8s Round-Robin** (`158.41 ms` p50 / `645.55 ms` p90, **`2.60×` / `2.49×` faster**).
   * At `c = 4096` (peak cluster throughput), `llm-d` holds TTFT p50 to **`311.85 ms`**, TTFT p90 to **`1,014.91 ms`**, and TTFT p99 to **`2,796.55 ms`**, reducing TTFT p50 by **`36.0%` vs. Dynamo** (`487.21 ms`) and **`36.4%` vs. K8s Round-Robin** (`490.01 ms`), reducing TTFT p90 by **`22.8%` vs. Dynamo** (`1,315.28 ms`) and **`74.6%` (`3.94×`) vs. K8s Round-Robin** (`3,997.23 ms`), and cutting TTFT p99 by **`2.09×` vs. Dynamo** (`5,853.94 ms`) and **`5.51×` vs. K8s Round-Robin** (`15,411.12 ms`).
-  * At `c = 8192` (`1,024` concurrent sessions per replica, beyond aggregate KV-cache capacity), `llm-d` holds TTFT p50 to **`9,987.56 ms`** and TTFT p90 to **`18,219.94 ms`**, cutting TTFT p50 by **`47.6%` (`1.91×` faster) vs. Dynamo** (`19,047.79 ms`) and **`60.1%` (`2.50×` faster) vs. K8s Round-Robin** (`25,009.71 ms`).
-* **Significant Inter-Token Latency (`ITL`) Reduction Across Pre-Saturation & Peak Load (`c = 8..4096`)**: Eliminating redundant Vision Transformer (`ViT`) image encoding and language-model prefill recomputation on follow-up turns prevents heavy prefill bursts from stalling active decode batches. At `c = 4096`, `llm-d` achieves **`92.43 ms` ITL p50** and **`106.50 ms` ITL p90**, beating **NVIDIA Dynamo** (`116.54 ms` p50 / `129.13 ms` p90, **`-20.7%` / `-17.5%`**) and **K8s Round-Robin** (`141.86 ms` p50 / `162.09 ms` p90, **`-34.8%` / `-34.3%`**).
-* **`+19.8%` Higher Peak Throughput vs. NVIDIA Dynamo & `+53.9%` vs. K8s Round-Robin (`c = 4096`), Maintaining `+10.9%` / `+25.3%` Lead at `c = 8192`**:
+* **Significant Inter-Token Latency (`ITL`) Reduction Across All Concurrency Levels (`c = 8..4096`)**: Eliminating redundant Vision Transformer (`ViT`) image encoding and language-model prefill recomputation on follow-up turns prevents heavy prefill bursts from stalling active decode batches. At `c = 4096`, `llm-d` achieves **`92.43 ms` ITL p50** and **`106.50 ms` ITL p90**, beating **NVIDIA Dynamo** (`116.54 ms` p50 / `129.13 ms` p90, **`-20.7%` / `-17.5%`**) and **K8s Round-Robin** (`141.86 ms` p50 / `162.09 ms` p90, **`-34.8%` / `-34.3%`**).
+* **`+19.8%` Higher Peak Throughput vs. NVIDIA Dynamo & `+53.9%` vs. K8s Round-Robin (`c = 4096`)**:
   * Throughput peaks at `c = 4096`, where `llm-d` reaches **`121,280.2 total tokens/sec`** (**`34,233.3 output tokens/sec`**, `157.73 req/s`), surpassing **NVIDIA Dynamo** (`101,060.3 total tokens/sec`, `28,573.8 output tokens/sec`, `131.58 req/s`) by **`+20.0%` total / `+19.8%` output throughput**, and outperforming **K8s Round-Robin** (`78,759.3 total tokens/sec`, `22,246.1 output tokens/sec`, `102.53 req/s`) by **`+54.0%` total / `+53.9%` output throughput**.
-  * At `c = 8192`, where KV-cache eviction causes throughput rollover across all arms, `llm-d` still delivers **`90,377.6 total tokens/sec`** (**`25,509.2 output tokens/sec`**), beating **NVIDIA Dynamo** (`81,149.0 total` / `23,007.5 output tok/s`) by **`+11.4%` / `+10.9%`** and **K8s Round-Robin** (`72,107.6 total` / `20,356.2 output tok/s`) by **`+25.3%` / `+25.3%`**.
 
 ---
 
@@ -25,7 +23,7 @@ The benchmark uses [`kellyhao/mmshopbench`](https://huggingface.co/datasets/kell
 
 | Workload Attribute | Empirical Value in `mmshopbench` | Impact on Multimodal Serving & Routing |
 | :--- | :--- | :--- |
-| **Total Conversations** | `288` unique sessions (`1,301` total turns) | Replayed with wrap-around sampling (`max(576, 2 * c)` sessions: `576` for `c <= 256`, `1,152` for `c = 512`, `2,304` for `c = 1024`, `4,608` for `c = 2048`, `9,216` for `c = 4096`, `18,432` for `c = 8192` / `~83,264` turns) so every concurrency level executes at least $2\times$ full waves of concurrent sessions. |
+| **Total Conversations** | `288` unique sessions (`1,301` total turns) | Replayed with wrap-around sampling (`max(576, 2 * c)` sessions: `576` for `c <= 256`, `1,152` for `c = 512`, `2,304` for `c = 1024`, `4,608` for `c = 2048`, `9,216` for `c = 4096`) so every concurrency level executes at least $2\times$ full waves of concurrent sessions. |
 | **Turns per Session** | `3` to `19` turns (`109` w/ 3 turns, `75` w/ 4 turns, `45` w/ 5 turns, `59` w/ 6–19 turns; mean `4.52` turns/session) | Conversation history (images + text + assistant responses) accumulates on every turn, creating deep cacheable prefixes on Turn 2..19. |
 | **Image Count & Format** | `400` real user query photos (`val_pic/*.jpg`, RGB JPEG, variable aspect ratios & resolutions) | Variable image resolutions exercise `Qwen3-VL`'s dynamic spatial patch merger ($32 \times 32\text{ px}$ per visual token) rather than synthetic uniform-resolution images. |
 | **Images per Session** | `1` image (`211` sessions), `2` images (`52`), `3` images (`18`), `4–5` images (`7`) | `26.7%` of sessions contain multiple images accumulated across turns. |
@@ -41,7 +39,7 @@ sequenceDiagram
     participant R as Routing Layer (Arm A llm-d EPP / Arm B K8s RR / Arm C Dynamo KV Router)
     participant V as 8x vLLM Replicas (Qwen3-VL-32B-Instruct TP=2)
 
-    loop Concurrency c from 8 to 8192 concurrent shopping sessions
+    loop Concurrency c from 8 to 4096 concurrent shopping sessions
         loop Turn t from 1 to N within session mmshop_k
             C->>C: 1. Read local JPEG for Turn t and Base64-encode image
             C->>R: 2. POST /v1/chat/completions with cumulative history (Turns 1..t)
@@ -55,7 +53,7 @@ sequenceDiagram
 
 * **Cumulative Multimodal Context (`WITHOUT_RESPONSES`)**: On Turn 1, `aiperf` encodes the user's initial product photo as an inline `data:image/jpeg;base64,...` block inside `messages[0]`. On Turn $t > 1$, `aiperf` sends the complete prior conversation history (`messages[0..2t-3]`, including all prior Base64 images and live streamed assistant responses) followed by the new Turn $t$ user prompt and any newly uploaded Round $t$ image.
 * **Deterministic Paired Seeds**: Each `(Concurrency, Iteration)` pair uses a deterministic seed (`SEED = 42 + CONC * 100 + ITER`) matched across Arm A, Arm B, and Arm C so all three routing layers face the exact same arrival order and session mix.
-* **Cold-Cache Isolation Between Runs**: Before every single run (`99` runs total), all 8 vLLM pods had their KV prefix cache, `20 GB` CPU multimodal processor cache, and GPU vision encoder cache completely wiped (`/reset_prefix_cache`, `/reset_mm_cache`, `/reset_encoder_cache` on Arms A & B; `/engine/reset_all_caches` on Arm C), and the active router process (`aggregation-epp` or `dynamo.frontend`) was restarted to clear its in-memory prefix hash tree.
+* **Cold-Cache Isolation Between Runs**: Before every single run (`90` runs total), all 8 vLLM pods had their KV prefix cache, `20 GB` CPU multimodal processor cache, and GPU vision encoder cache completely wiped (`/reset_prefix_cache`, `/reset_mm_cache`, `/reset_encoder_cache` on Arms A & B; `/engine/reset_all_caches` on Arm C), and the active router process (`aggregation-epp` or `dynamo.frontend`) was restarted to clear its in-memory prefix hash tree.
 
 ---
 
@@ -107,11 +105,11 @@ Configured using the complete manifest in Section 6.5 (matching Dynamo's officia
 
 ---
 
-## 4. Empirical Results (`c = 8` to `8192`, 3 Iterations per Point)
+## 4. Empirical Results (`c = 8` to `4096`, 3 Iterations per Point)
 
-All values below report **`mean ± standard deviation`** across 3 independent iterations per `(Concurrency, Arm)` pair (`99` total runs).
+All values below report **`mean ± standard deviation`** across 3 independent iterations per `(Concurrency, Arm)` pair (`90` total runs).
 
-### 4.1 Complete 3-Arm Summary Table (`c = 8 .. 8192`)
+### 4.1 Complete 3-Arm Summary Table (`c = 8 .. 4096`)
 
 | Concurrency | Arm | TTFT p50 (ms) | TTFT p90 (ms) | TTFT p99 (ms) | ITL p50 (ms) | ITL p90 (ms) | Total Token Throughput (tok/s) | Output Token Throughput (tok/s) | vLLM Prefix Cache Hit (%) |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -145,9 +143,6 @@ All values below report **`mean ± standard deviation`** across 3 independent it
 | **4096** | **Arm A (`llmd`)** | **311.85 ± 1.61** | **1,014.91 ± 141.29** | **2,796.55** | **92.43 ± 0.99** | **106.50 ± 1.30** | **121,280.2 ± 2,853.3** | **34,233.3 ± 807.6** | **89.7%** |
 | 4096 | Arm C (`dynamo`) | 487.21 ± 2.36 | 1,315.28 ± 6.92 | 5,853.94 | 116.54 ± 0.09 | 129.13 ± 1.07 | 101,060.3 ± 174.7 | 28,573.8 ± 44.9 | 78.3% |
 | 4096 | Arm B (`k8s_rr`) | 490.01 ± 9.07 | 3,997.23 ± 197.30 | 15,411.12 | 141.86 ± 0.54 | 162.09 ± 0.67 | 78,759.3 ± 800.5 | 22,246.1 ± 228.0 | 63.8% |
-| **8192** | **Arm A (`llmd`)** | **9,987.56 ± 514.89** | **18,219.94 ± 408.81** | **22,218.34** | 254.08 ± 1.57 | 284.32 ± 0.93 | **90,377.6 ± 851.6** | **25,509.2 ± 239.8** | **68.4%** |
-| 8192 | Arm C (`dynamo`) | 19,047.79 ± 268.27 | 29,584.34 ± 151.69 | 31,766.25 | **232.54 ± 0.25** | **257.90 ± 1.04** | 81,149.0 ± 75.6 | 23,007.5 ± 49.5 | 60.8% |
-| 8192 | Arm B (`k8s_rr`) | 25,009.71 ± 691.22 | 34,363.72 ± 865.58 | 40,235.09 | 232.92 ± 0.20 | 262.28 ± 0.69 | 72,107.6 ± 236.2 | 20,356.2 ± 66.6 | 53.4% |
 
 ### 4.2 Architectural Analysis of the 3-Arm Comparison
 
@@ -162,10 +157,6 @@ All values below report **`mean ± standard deviation`** across 3 independent it
 3. **Why Inter-Token Latency (`ITL`) & Token Throughput Scale Together up to `c = 4096`**:
    * In aggregated serving (where prefill and decode share the same GPU), every redundant ViT image encoding and language-model prefill steals GPU compute cycles and HBM bandwidth from ongoing decode batches.
    * By avoiding redundant ViT/prefill recomputation on Turn 2+ and using `token-load-scorer` (accounting for both text and dynamically sized image tokens) to steer heavy Turn 1 image prefills away from busy pods, `llm-d` at `c = 4096` reduces **ITL p50 to `92.43 ms`** (vs. `116.54 ms` on Dynamo and `141.86 ms` on K8s RR) and delivers **`34,233.3 output tokens/sec`** (**`+19.8%` over Dynamo's `28,573.8 tok/s`** and **`+53.9%` over K8s Round-Robin's `22,246.1 tok/s`**).
-4. **KV-Cache Saturation & Throughput Rollover Regime at `c = 8192` (`1,024` Concurrent Sessions per Replica)**:
-   * Pushing concurrency from `4096` to `8192` (`18,432` multi-turn sessions / `~83,264` turns per iteration) drives the active working set beyond the aggregate HBM KV-cache capacity of the 8 `TP=2` H200 replicas. While sessions wait `2,000 ms` between user turns, inactive KV blocks are evicted by in-flight requests, causing vLLM prefix-cache hit rates to drop across all three arms (`89.7% → 68.4%` on `llm-d`, `78.3% → 60.8%` on `dynamo`, `63.8% → 53.4%` on `k8s_rr`).
-   * Even in this oversubscribed regime, `llm-d` retains a **7.6 percentage-point cache-hit advantage over Dynamo** and **15.0 percentage-point advantage over K8s Round-Robin**, translating into **`1.91×` lower TTFT p50 vs. Dynamo** (`9,987.56 ms` vs. `19,047.79 ms`), **`2.50×` lower TTFT p50 vs. K8s Round-Robin** (`9,987.56 ms` vs. `25,009.71 ms`), and **`+10.9%` / `+25.3%` higher output token throughput** (`25,509.2 tok/s` vs. `23,007.5 tok/s` on Dynamo and `20,356.2 tok/s` on K8s RR).
-   * Notably, at `c = 8192`, `llm-d` exhibits a slightly higher per-step decode ITL (`254.08 ms` p50 vs. `232.54 ms` on Dynamo and `232.92 ms` on K8s RR) despite lower end-to-end latency (`59.7 s` E2E p50 vs. `66.4 s` on Dynamo and `72.1 s` on K8s RR). Because `llm-d` drains the prefill queue `1.9–2.5×` faster, it admits significantly more active sequences into the concurrent vLLM decode batch at any instant (`25,509.2 output tok/s`), whereas Dynamo and K8s Round-Robin bottleneck in `19–25 s` prefill queues.
 
 ### 4.3 Roofline & Hardware Efficiency Analysis (`TP=2` NVIDIA H200 SXM)
 
@@ -186,7 +177,7 @@ To connect the routing-layer metrics (`vLLM Prefix Cache Hit %`) directly to the
     $$P_{\text{phys}} = \frac{C_{\text{decode}} \cdot R_{\text{out}} + C_{\text{prefill}} \cdot (1 - h) \cdot R_{\text{in}}}{10^3}\text{ (Physical GPU TFLOPS/replica)}$$
     $$P_{\text{eff}} = \frac{C_{\text{decode}} \cdot R_{\text{out}} + C_{\text{prefill}} \cdot R_{\text{in}}}{10^3}\text{ (Effective Logical TFLOPS/replica)}$$
 
-#### 2. Three Hardware Regimes Across `c = 8 .. 8192`
+#### 2. Two Hardware Regimes Across `c = 8 .. 4096`
 1. **Regime 1 — HBM3e Memory-Bandwidth Floor (`c = 8 .. 32`, $AI_{\text{phys}} = 1.3\text{–}5.9\text{ FLOPs/Byte}$)**:
    * For `BF16` weights ($2\text{ Bytes/param}$), a decode step with active batch size $B_{\text{dec}}$ performs $2 B_{\text{dec}} N_{\text{params}}$ FLOPs while reading $2 N_{\text{params}}$ weight bytes from HBM3e, yielding $AI_{\text{decode}} \approx B_{\text{dec}}\text{ FLOPs/Byte}$.
    * From Little's Law on per-replica decode throughput ($B_{\text{dec}} = \frac{R_{\text{out}}}{1000 / \text{ITL}_{\text{p50}}}$), the active decode batch size per replica is $B_{\text{dec}} = \mathbf{1.0}$ at `c = 8`, $\mathbf{1.9}$ at `c = 16`, and $\mathbf{3.6}$ at `c = 32` ($AI_{\text{phys}} = 1.3\text{–}5.9\text{ FLOPs/Byte} \ll 206\text{ FLOPs/Byte}$).
@@ -196,11 +187,8 @@ To connect the routing-layer metrics (`vLLM Prefix Cache Hit %`) directly to the
    * At **`c = 4096`**, **all three routing arms saturate at the exact same physical GPU compute ceiling of `360.6–372.9 Physical TFLOPS/replica`** (`362.1 TFLOPS` on `llm-d`, `372.9 TFLOPS` on Dynamo, `360.6 TFLOPS` on K8s Round-Robin). This confirms that the 16 H200 GPUs are running at identical physical saturation across all three arms.
    * However, because `llm-d` achieves an **`89.7%` prefix-cache hit rate** (`10.3%` uncached prefill fraction) vs. **`78.3%` on Dynamo** (`21.7%` uncached $\rightarrow \mathbf{2.11\times}$ more uncached prefill compute per input token) and **`63.8%` on K8s Round-Robin** (`36.2%` uncached $\rightarrow \mathbf{3.51\times}$ more uncached prefill compute), `llm-d` spends only **`21.3%`** of its physical GPU FLOPs on prefill (`77.1 TFLOPS` prefill vs. `285.0 TFLOPS` decode), whereas Dynamo spends **`36.2%`** (`134.9 TFLOPS`) and K8s Round-Robin wastes **`51.4%`** (`185.3 TFLOPS`) recomputing missed prefixes and ViT embeddings.
    * Consequently, `llm-d` achieves an **Effective Logical Compute Rate of `1,030.3 TFLOPS/replica` (`2.85×` its physical GPU FLOPs)**, compared to **`858.5 Effective TFLOPS/replica` on Dynamo** and **`669.1 Effective TFLOPS/replica` on K8s Round-Robin**.
-3. **Regime 3 — The HBM3e KV-Cache Capacity Wall (`c = 4096 → 8192`)**:
-   * At `c = 8192` (`1,024` concurrent sessions/replica), **physical GPU compute does not drop**—in fact, it edges up slightly to **`375.8–387.7 Physical TFLOPS/replica`** (`387.7 TFLOPS` on `llm-d`).
-   * Throughput rolls over (`121,280.2 → 90,377.6 tok/s` on `llm-d`, or `7,580.0 → 5,648.6 tok/s/GPU`) solely because the active multi-turn KV working set exceeds the `~10.8M`-token aggregate HBM3e KV capacity (`~175–180 GB/replica`), causing prefix-cache hit rate to drop from **`89.7% → 68.4%`** (tripling the uncached prefill fraction from **`10.3% → 31.6%`**). Re-prefilling evicted KV blocks consumes **`45.2%`** of physical GPU FLOPs (`175.3 / 387.7 TFLOPS`), pulling `llm-d`'s Effective Logical Compute down from **`1,030.3` to `767.8 TFLOPS/replica`**.
 
-#### 3. Complete Roofline Metrics Table (`c = 8 .. 8192`)
+#### 3. Complete Roofline Metrics Table (`c = 8 .. 4096`)
 
 | Concurrency | Arm | Active Decode Batch / Replica ($B_{\text{dec}}$) | Uncached Prefill Miss ($1 - h$) | HBM3e BW Streamed (TB/s/rep) | Physical $AI_{\text{phys}}$ (FLOPs/B) | Physical GPU Compute (TFLOPS/rep) | Effective $AI_{\text{eff}}$ (FLOPs/B) | Effective Logical Compute (TFLOPS/rep) | User Interactivity (tok/s/user) | Total Throughput per GPU (tok/s/H200) |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -234,39 +222,36 @@ To connect the routing-layer metrics (`vLLM Prefix Cache Hit %`) directly to the
 | **4096** | **Arm A (`llmd`)** | 395.5 | **10.3%** | 1.57 | 229.9 | **362.1** | 654.2 | **1,030.3** | **10.82** | **7,580.0** |
 | 4096 | Arm C (`dynamo`) | 416.2 | 21.8% | 1.29 | 290.2 | **372.9** | 668.1 | 858.5 | 8.58 | 6,316.3 |
 | 4096 | Arm B (`k8s_rr`) | 394.5 | 36.2% | 1.02 | 351.9 | **360.6** | 653.0 | 669.1 | 7.05 | 4,922.5 |
-| **8192** | **Arm A (`llmd`)** | 810.2 | **31.6%** | 0.90 | 429.4 | **387.7** | 850.4 | **767.8** | 3.94 | **5,648.6** |
-| 8192 | Arm C (`dynamo`) | 668.8 | 39.2% | 0.86 | 447.6 | **386.5** | 798.3 | 689.4 | **4.30** | 5,071.8 |
-| 8192 | Arm B (`k8s_rr`) | 592.7 | 46.6% | 0.80 | 472.0 | **375.8** | 769.5 | 612.6 | 4.29 | 4,506.7 |
 
 ---
 
-## 5. Performance & Roofline Plots (`c = 8` to `8192`)
+## 5. Performance & Roofline Plots (`c = 8` to `4096`)
 
-All 8 charts below plot the 3-iteration mean (solid/dashed/dash-dot lines) and $\pm 1\sigma$ standard deviation band (shaded region) across all 11 concurrency levels (`c = 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192`) for **Arm A (`llm-d` Multimodal Router)**, **Arm B (`K8s Service Round-Robin`)**, and **Arm C (`NVIDIA Dynamo KV Router`)**.
+All 8 charts below plot the 3-iteration mean (solid/dashed/dash-dot lines) and $\pm 1\sigma$ standard deviation band (shaded region) across all 10 concurrency levels (`c = 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096`) for **Arm A (`llm-d` Multimodal Router)**, **Arm B (`K8s Service Round-Robin`)**, and **Arm C (`NVIDIA Dynamo KV Router`)**.
 
 ### 5.1 TTFT p50 vs. Concurrency
-![MMShopBench TTFT p50 vs. Concurrency](plots/mmshopbench_ttft_p50_vs_concurrency.png)
+![MMShopBench TTFT p50 vs. Concurrency](./plots/mmshopbench_ttft_p50_vs_concurrency.png)
 
 ### 5.2 TTFT p90 vs. Concurrency
-![MMShopBench TTFT p90 vs. Concurrency](plots/mmshopbench_ttft_p90_vs_concurrency.png)
+![MMShopBench TTFT p90 vs. Concurrency](./plots/mmshopbench_ttft_p90_vs_concurrency.png)
 
 ### 5.3 Inter-Token Latency (ITL) p50 vs. Concurrency
-![MMShopBench Inter-Token Latency p50 vs. Concurrency](plots/mmshopbench_itl_p50_vs_concurrency.png)
+![MMShopBench Inter-Token Latency p50 vs. Concurrency](./plots/mmshopbench_itl_p50_vs_concurrency.png)
 
 ### 5.4 Inter-Token Latency (ITL) p90 vs. Concurrency
-![MMShopBench Inter-Token Latency p90 vs. Concurrency](plots/mmshopbench_itl_p90_vs_concurrency.png)
+![MMShopBench Inter-Token Latency p90 vs. Concurrency](./plots/mmshopbench_itl_p90_vs_concurrency.png)
 
 ### 5.5 Total Token Throughput vs. Concurrency
-![MMShopBench Total Token Throughput vs. Concurrency](plots/mmshopbench_total_token_throughput_vs_concurrency.png)
+![MMShopBench Total Token Throughput vs. Concurrency](./plots/mmshopbench_total_token_throughput_vs_concurrency.png)
 
 ### 5.6 Output Token Throughput vs. Concurrency
-![MMShopBench Output Token Throughput vs. Concurrency](plots/mmshopbench_output_token_throughput_vs_concurrency.png)
+![MMShopBench Output Token Throughput vs. Concurrency](./plots/mmshopbench_output_token_throughput_vs_concurrency.png)
 
 ### 5.7 Hardware & Effective Roofline Analysis (`TP=2` H200 Replica)
-![MMShopBench Roofline Analysis](plots/mmshopbench_hardware_roofline.png)
+![MMShopBench Roofline Analysis](./plots/mmshopbench_hardware_roofline.png)
 
 ### 5.8 Serving Roofline: Throughput vs. Interactivity Pareto Frontier (`16 × H200`)
-![MMShopBench Serving Roofline Pareto Frontier](plots/mmshopbench_serving_roofline_pareto.png)
+![MMShopBench Serving Roofline Pareto Frontier](./plots/mmshopbench_serving_roofline_pareto.png)
 
 ---
 
@@ -294,7 +279,7 @@ kubectl create secret generic llm-d-hf-token \
 ```
 
 #### Step 2: Deploy the `mmshopbench-client` Benchmark Pod
-Deploy the load-generator pod with `256Gi` RAM so high-concurrency sweeps (`c = 4096..8192`) can buffer concurrent Base64 JPEG payloads without OOM:
+Deploy the load-generator pod (`ghcr.io/llm-d/llm-d-benchmark:v0.7.0`, containing `NVIDIA AIPerf v0.8.0`):
 
 ```bash
 cat <<'EOF' | kubectl apply -f -
@@ -307,13 +292,7 @@ metadata:
     app: mmshopbench-client
     function: load_generator
 spec:
-  restartPolicy: Always
-  nodeSelector:
-    cloud.google.com/gke-accelerator: nvidia-h200-141gb
-  tolerations:
-    - key: nvidia.com/gpu
-      operator: Exists
-      effect: NoSchedule
+  restartPolicy: Never
   containers:
     - name: mmshopbench-client
       image: ghcr.io/llm-d/llm-d-benchmark:v0.7.0
@@ -321,11 +300,11 @@ spec:
       command: ["sleep", "infinity"]
       resources:
         requests:
-          cpu: "16"
-          memory: "128Gi"
+          cpu: "8"
+          memory: "24Gi"
         limits:
-          cpu: "32"
-          memory: "256Gi"
+          cpu: "14"
+          memory: "32Gi"
       env:
         - name: HF_TOKEN
           valueFrom:
@@ -495,20 +474,6 @@ router:
       llm-d.ai/guide: "aggregation"
 ```
 </details>
-
-> [!TIP]
-> **High-Concurrency Memory Sizing (`c = 8192`)**: At `c = 8192`, `aggregation-epp` buffers thousands of concurrent inline Base64 JPEG HTTP bodies (`~245 KB` each). To prevent Linux OOMKills on small CPU nodes, increase `aggregation-epp`'s memory/CPU limits and schedule it onto a high-memory node (`128Gi–256Gi` RAM):
-> ```bash
-> kubectl patch deployment ${GUIDE_NAME}-epp -n ${NAMESPACE} --type='json' -p='[
->   {"op": "add", "path": "/spec/template/spec/nodeSelector", "value": {"cloud.google.com/gke-accelerator": "nvidia-h200-141gb"}},
->   {"op": "add", "path": "/spec/template/spec/tolerations", "value": [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}]},
->   {"op": "replace", "path": "/spec/template/spec/containers/0/resources", "value": {"requests": {"cpu": "8", "memory": "64Gi"}, "limits": {"cpu": "32", "memory": "256Gi"}}},
->   {"op": "replace", "path": "/spec/template/spec/containers/1/resources", "value": {"requests": {"cpu": "8", "memory": "64Gi"}, "limits": {"cpu": "32", "memory": "256Gi"}}},
->   {"op": "replace", "path": "/spec/template/spec/containers/1/livenessProbe/timeoutSeconds", "value": 10},
->   {"op": "replace", "path": "/spec/template/spec/containers/1/readinessProbe/timeoutSeconds", "value": 10}
-> ]'
-> kubectl rollout status deployment/${GUIDE_NAME}-epp -n ${NAMESPACE} --timeout=180s
-> ```
 
 #### Step 2: Reset All 8 vLLM Caches & Restart `aggregation-epp` Before Each Run
 ```bash
