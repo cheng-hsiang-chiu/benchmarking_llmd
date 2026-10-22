@@ -9,7 +9,7 @@ This directory contains the complete benchmark report, 90-run empirical results 
 ## 1. Key Findings (`90` Runs Across `c = 8 .. 4096`, `0` Failed Requests)
 
 * **Highest Multimodal Prefix-Cache Hit Rate (`85.3%–89.7%` across `c = 8..4096`)**:
-  * **Arm A (`llm-d` Multimodal EPP Router)** hashes both text and image blocks (using dynamic $32 \times 32\text{ px}$ patch estimation in `token-producer` and `affinityThreshold: 0.6` in `prefix-cache-affinity-filter`) to keep multi-turn shopping sessions—including the `28.3%` of image turns uploaded on Round 2+—pinned to the replica holding prior KV and ViT caches.
+  * **Arm A (`llm-d` Multimodal EPP Router)** hashes both text and image blocks (using dynamic $32 \times 32\text{ px}$ patch estimation in `token-producer` and `affinityThreshold: 0.6` in `prefix-cache-affinity-filter`) to keep multi-turn shopping sessions—including the `28.3%` of image turns uploaded on Turn 2+—pinned to the replica holding prior KV and ViT caches.
   * By comparison, **Arm C (`NVIDIA Dynamo KV Router`)** achieves `69.3%–83.0%` across `c = 8..4096`, and **Arm B (`Kubernetes Round-Robin`)** drops to `49.0%–63.8%` at `c = 128..4096`.
 * **Up to `3.94×` Lower TTFT p90 at Peak Throughput (`c = 4096`)**:
   * At `c = 256`, `llm-d` achieves **`61.02 ms` TTFT p50** and **`259.16 ms` TTFT p90**, outperforming **Dynamo** (`109.93 ms` p50 / `395.72 ms` p90, **`1.80×` / `1.53×` faster**) and **K8s Round-Robin** (`158.41 ms` p50 / `645.55 ms` p90, **`2.60×` / `2.49×` faster**).

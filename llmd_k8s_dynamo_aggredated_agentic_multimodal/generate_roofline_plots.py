@@ -365,7 +365,7 @@ def render_hardware_roofline(metrics: dict, out_path: Path):
     m_k4096 = metrics["k8s_rr"][9]
     px_k4, py_k4 = to_px(m_k4096["eff_ai"], m_k4096["eff_tflops"])
     draw_leader(ctx, px_k4, py_k4, px_k4 + 65, py_k4 + 28, color_k8s)
-    draw_text(ctx, "K8s RR Peak (c=4096): 669 Eff TFLOPS",
+    draw_text(ctx, "K8s Peak (c=4096): 669 Eff TFLOPS",
               px_k4 + 72, py_k4 + 30, "DejaVu Sans Bold 16.5", color_k8s, ha="left", va="center")
 
     # Physical curve c=4096 label below the purple curve
@@ -389,7 +389,7 @@ def render_hardware_roofline(metrics: dict, out_path: Path):
         ("#202124", None, "-", "Theoretical TP=2 H200 Roofline (9.6 TB/s HBM3e, 1,978 TFLOPS BF16)"),
         ("#1a73e8", "o", "-", "Arm A: llm-d Effective Logical Compute (89.7% Prefix Hit at Peak)"),
         ("#1e8e3e", "^", "-.", "Arm C: NVIDIA Dynamo Effective Logical Compute (78.3% Hit at Peak)"),
-        ("#d93025", "s", "--", "Arm B: K8s Round-Robin Effective Logical Compute (63.8% Hit at Peak)"),
+        ("#d93025", "s", "--", "Arm B: K8s Service Effective Logical Compute (63.8% Hit at Peak)"),
         ("#6a1b9a", "d", ":", "Actual Physical GPU Compute Executed (Saturates at ~361–373 TFLOPS)"),
     ]
     for i, (col_hex, mk, ls, lbl) in enumerate(legend_items):
@@ -558,7 +558,7 @@ def render_serving_pareto_roofline(metrics: dict, out_path: Path):
     m_a4 = metrics["llmd"][9]
     px_a4, py_a4 = to_px(m_a4["interactivity"], m_a4["tot_tps_per_gpu"])
     draw_leader(ctx, px_a4, py_a4, px_a4 + 125, py_a4 - 38, color_llmd)
-    draw_text(ctx, "llm-d Peak (c=4096): 7,580 tok/s/GPU\n(+20.0% vs Dynamo, +54.0% vs K8s RR)",
+    draw_text(ctx, "llm-d Peak (c=4096): 7,580 tok/s/GPU\n(+20.0% vs Dynamo, +54.0% vs K8s Service)",
               px_a4 + 132, py_a4 - 40, "DejaVu Sans Bold 17.5", color_llmd, ha="left", va="center")
 
     m_d4 = metrics["dynamo"][9]
@@ -570,11 +570,11 @@ def render_serving_pareto_roofline(metrics: dict, out_path: Path):
     m_k4 = metrics["k8s_rr"][9]
     px_k4, py_k4 = to_px(m_k4["interactivity"], m_k4["tot_tps_per_gpu"])
     draw_leader(ctx, px_k4, py_k4, px_k4 + 10, py_k4 + 215, color_k8s)
-    draw_text(ctx, "K8s RR Peak (c=4096): 4,922 tok/s/GPU",
+    draw_text(ctx, "K8s Peak (c=4096): 4,922 tok/s/GPU",
               px_k4 + 16, py_k4 + 218, "DejaVu Sans Bold 16.5", color_k8s, ha="left", va="center")
 
     # Legend (top-right)
-    leg_w, leg_h = 900, 175
+    leg_w, leg_h = 720, 175
     leg_x, leg_y = right - leg_w - 28, top + 24
     ctx.save()
     ctx.set_source_rgba(1, 1, 1, 0.93)
@@ -586,8 +586,8 @@ def render_serving_pareto_roofline(metrics: dict, out_path: Path):
     ctx.restore()
 
     legend_items = [
-        ("#1a73e8", "o", "-", "Arm A: llm-d Multimodal Router (EPP)"),
-        ("#d93025", "s", "--", "Arm B: K8s Service (Round-Robin Baseline)"),
+        ("#1a73e8", "o", "-", "Arm A: llm-d Multimodal Router"),
+        ("#d93025", "s", "--", "Arm B: K8s Service"),
         ("#1e8e3e", "^", "-.", "Arm C: NVIDIA Dynamo KV Router"),
     ]
     for i, (col_hex, mk, ls, lbl) in enumerate(legend_items):
@@ -816,7 +816,7 @@ def render_concurrency_charts(data: dict, concs: list[int], out_dir: Path):
         draw_text(ctx, spec["ylabel"], 65, top + ph / 2, "DejaVu Sans Bold 22.5", (0.05, 0.05, 0.05), ha="center", va="center", angle_deg=-90)
 
         # Legend (top-left)
-        leg_x, leg_y, leg_w, leg_h = left + 28, top + 24, 900, 175
+        leg_x, leg_y, leg_w, leg_h = left + 28, top + 24, 720, 175
         ctx.save()
         ctx.set_source_rgba(1, 1, 1, 0.93)
         ctx.rectangle(leg_x, leg_y, leg_w, leg_h)
@@ -827,8 +827,8 @@ def render_concurrency_charts(data: dict, concs: list[int], out_dir: Path):
         ctx.restore()
 
         legend_items = [
-            ("#1a73e8", "o", "-", "Arm A: llm-d Multimodal Router (EPP)"),
-            ("#d93025", "s", "--", "Arm B: K8s Service (Round-Robin Baseline)"),
+            ("#1a73e8", "o", "-", "Arm A: llm-d Multimodal Router"),
+            ("#d93025", "s", "--", "Arm B: K8s Service"),
             ("#1e8e3e", "^", "-.", "Arm C: NVIDIA Dynamo KV Router"),
         ]
         for i, (col_hex, mk, ls, lbl) in enumerate(legend_items):
