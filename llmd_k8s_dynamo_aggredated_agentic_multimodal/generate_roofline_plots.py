@@ -9,8 +9,8 @@ gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Pango, PangoCairo
 
-DATA_PATH = Path("/usr/local/google/home/cchenghsiang/.gemini/jetski/brain/ee3b9add-1d9b-4811-9e20-74e27f6f95ca/scratch/mmshopbench_plot_data.json")
-OUT_DIR = Path("/usr/local/google/home/cchenghsiang/.gemini/jetski/brain/ee3b9add-1d9b-4811-9e20-74e27f6f95ca")
+DATA_PATH = Path("data.json")
+OUT_DIR = Path("out")
 
 # Hardware constants for 1 Replica = TP=2 NVIDIA H200 SXM (141GB HBM3e each)
 NUM_REPLICAS = 8
